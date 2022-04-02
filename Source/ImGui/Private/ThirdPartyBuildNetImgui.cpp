@@ -173,7 +173,7 @@ void NetImGuiStartup()
 void NetImGuiShutdown()
 {
 #if NETIMGUI_ENABLED
-	NetImgui::Shutdown(true);
+	NetImgui::Shutdown();
 	if( spNetImguiContext )
 	{
 		ImGui::DestroyContext(spNetImguiContext);

@@ -68,6 +68,7 @@ bool Communications_Initialize(ClientInfo& client)
 		client.mbHasTextureUpdate			= true;								// Force sending the client textures
 		client.mBGSettingSent.mTextureId	= client.mBGSetting.mTextureId-1u;	// Force sending the Background settings (by making different than current settings)
 		client.mpSocketComs					= client.mpSocketPending.exchange(nullptr);
+		client.mFrameIndex					= 0;
 	}
 	return client.mpSocketComs.load() != nullptr;
 }
@@ -95,7 +96,7 @@ void Communications_Incoming_Input(ClientInfo& client, uint8_t*& pCmdData)
 bool Communications_Outgoing_Textures(ClientInfo& client)
 {	
 	bool bSuccess(true);
-	client.TextureProcessPending();
+	client.ProcessTexturePending();
 	if( client.mbHasTextureUpdate )
 	{
 		for(auto& cmdTexture : client.mTextures)
@@ -139,8 +140,37 @@ bool Communications_Outgoing_Frame(ClientInfo& client)
 	CmdDrawFrame* pPendingDrawFrame = client.mPendingFrameOut.Release();
 	if( pPendingDrawFrame )
 	{
+		pPendingDrawFrame->mFrameIndex	= client.mFrameIndex++;
+		//---------------------------------------------------------------------
+		// Apply delta compression to DrawCommand, when requested
+		if( pPendingDrawFrame->mCompressed )
+		{
+			// Create a new Compressed DrawFrame Command
+			if( client.mpDrawFramePrevious && !client.mServerCompressionSkip ){
+				client.mpDrawFramePrevious->ToPointers();
+				CmdDrawFrame* pDrawFrameCompressed	= CompressCmdDrawFrame(client.mpDrawFramePrevious, pPendingDrawFrame);
+				netImguiDeleteSafe(client.mpDrawFramePrevious);
+				client.mpDrawFramePrevious			= pPendingDrawFrame;	// Keep original new command for next frame delta compression
+				pPendingDrawFrame					= pDrawFrameCompressed;	// Request compressed copy to be sent to server
+			}
+			// Save DrawCmd for next frame delta compression
+			else {
+				pPendingDrawFrame->mCompressed		= false;
+				client.mpDrawFramePrevious			= pPendingDrawFrame;
+			}
+		}
+		client.mServerCompressionSkip = false;
+
+		//---------------------------------------------------------------------
+		// Send Command to server
+		pPendingDrawFrame->ToOffsets();
 		bSuccess = Network::DataSend(client.mpSocketComs, pPendingDrawFrame, pPendingDrawFrame->mHeader.mSize);
-		netImguiDeleteSafe(pPendingDrawFrame);
+
+		//---------------------------------------------------------------------
+		// Free created data once sent (when not used in next frame)
+		if( client.mpDrawFramePrevious != pPendingDrawFrame ){
+			netImguiDeleteSafe(pPendingDrawFrame);
+		}
 	}
 	return bSuccess;
 }
@@ -195,7 +225,7 @@ bool Communications_Incoming(ClientInfo& client)
 			{
 			case CmdHeader::eCommands::Ping:		bPingReceived = true; break;
 			case CmdHeader::eCommands::Disconnect:	bOk = false; break;
-			case CmdHeader::eCommands::Input:		Communications_Incoming_Input(client, pCmdData); break;			
+			case CmdHeader::eCommands::Input:		Communications_Incoming_Input(client, pCmdData); break;
 			// Commands not received in main loop, by Client
 			case CmdHeader::eCommands::Invalid:
 			case CmdHeader::eCommands::Version:
@@ -220,7 +250,7 @@ bool Communications_Outgoing(ClientInfo& client)
 	if( bSuccess )
 		bSuccess = Communications_Outgoing_Background(client);
 	if( bSuccess )
-		bSuccess = Communications_Outgoing_Frame(client);	
+		bSuccess = Communications_Outgoing_Frame(client);
 	if( bSuccess )
 		bSuccess = Communications_Outgoing_Disconnect(client);
 	if( bSuccess )
@@ -234,18 +264,21 @@ bool Communications_Outgoing(ClientInfo& client)
 //=================================================================================================
 void CommunicationsClient(void* pClientVoid)
 {	
-	ClientInfo* pClient = reinterpret_cast<ClientInfo*>(pClientVoid);
+	ClientInfo* pClient				= reinterpret_cast<ClientInfo*>(pClientVoid);
+	pClient->mbClientThreadActive	= true;
+	pClient->mbDisconnectRequest	= false;
 	Communications_Initialize(*pClient);
-	bool bConnected(pClient->IsConnected());
-	while( bConnected )
+	bool bConnected					= pClient->IsConnected();
+	
+	while( bConnected && !pClient->mbDisconnectRequest )
 	{
 		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 		//std::this_thread::yield();
-		bConnected = !pClient->mbDisconnectRequest && Communications_Outgoing(*pClient) && Communications_Incoming(*pClient);		
+		bConnected = Communications_Outgoing(*pClient) && Communications_Incoming(*pClient);
 	}
 
 	pClient->KillSocketComs();
-	pClient->mbDisconnectRequest = false; // Signal the main thread that it can continue
+	pClient->mbClientThreadActive	= false;
 }
 
 //=================================================================================================
@@ -253,26 +286,29 @@ void CommunicationsClient(void* pClientVoid)
 //=================================================================================================
 void CommunicationsHost(void* pClientVoid)
 {
-	ClientInfo* pClient		= reinterpret_cast<ClientInfo*>(pClientVoid);
-	pClient->mpSocketListen	= pClient->mpSocketPending.exchange(nullptr);
-	while( !pClient->mbDisconnectRequest && pClient->mpSocketListen.load() != nullptr )
+	ClientInfo* pClient				= reinterpret_cast<ClientInfo*>(pClientVoid);
+	pClient->mbListenThreadActive	= true;
+	pClient->mbDisconnectRequest	= false;
+	pClient->mpSocketListen			= pClient->mpSocketPending.exchange(nullptr);
+	
+	while( pClient->mpSocketListen.load() != nullptr && !pClient->mbDisconnectRequest )
 	{
-		std::this_thread::sleep_for(std::chrono::milliseconds(10));	// Prevents this thread from taking entire core, waiting on server connection
 		pClient->mpSocketPending = Network::ListenConnect(pClient->mpSocketListen);
 		if( pClient->mpSocketPending.load() != nullptr )
 		{
 			bool bConnected = Communications_Initialize(*pClient);
-			while (bConnected)
+			while (bConnected && !pClient->mbDisconnectRequest)
 			{
 				std::this_thread::sleep_for(std::chrono::milliseconds(1));
 				//std::this_thread::yield();
-				bConnected	= !pClient->mbDisconnectRequest && Communications_Outgoing(*pClient) && Communications_Incoming(*pClient);
+				bConnected	= Communications_Outgoing(*pClient) && Communications_Incoming(*pClient);
 			}
 			pClient->KillSocketComs();
 		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));	// Prevents this thread from taking entire core, waiting on server connection
 	}
 	pClient->KillSocketListen();
-	pClient->mbDisconnectRequest = false; // Signal the main thread that it can continue
+	pClient->mbListenThreadActive	= false;
 }
 
 //=================================================================================================
@@ -309,6 +345,7 @@ ClientInfo::ClientInfo()
 : mpSocketPending(nullptr)
 , mpSocketComs(nullptr)
 , mpSocketListen(nullptr)
+, mFontTextureID(TextureCastHelper(uint64_t(0u)))
 , mTexturesPendingSent(0)
 , mTexturesPendingCreated(0)
 {
@@ -330,40 +367,8 @@ ClientInfo::~ClientInfo()
 		netImguiDeleteSafe(mTexturesPending[i]);
 	}
 
-	netImguiDeleteSafe(mpLastInput);
-}
-
-//=================================================================================================
-// 
-//=================================================================================================
-void ClientInfo::TextureProcessPending()
-{
-	while( mTexturesPendingCreated != mTexturesPendingSent )
-	{
-		mbHasTextureUpdate			|= true;
-		uint32_t idx				= mTexturesPendingSent.fetch_add(1) % static_cast<int32_t>(ArrayCount(mTexturesPending));
-		CmdTexture* pCmdTexture		= mTexturesPending[idx];
-		mTexturesPending[idx]		= nullptr;
-		if( pCmdTexture )
-		{
-			// Find the TextureId from our list (or free slot)
-			int texIdx		= 0;
-			int texFreeSlot	= static_cast<int>(mTextures.size());
-			while( texIdx < mTextures.size() && ( !mTextures[texIdx].IsValid() || mTextures[texIdx].mpCmdTexture->mTextureId != pCmdTexture->mTextureId) )
-			{
-				texFreeSlot = !mTextures[texIdx].IsValid() ? texIdx : texFreeSlot;
-				++texIdx;
-			}
-
-			if( texIdx == mTextures.size() )
-				texIdx = texFreeSlot;
-			if( texIdx == mTextures.size() )
-				mTextures.push_back(ClientTexture());
-
-			mTextures[texIdx].Set( pCmdTexture );
-			mTextures[texIdx].mbSent = false;
-		}
-	}
+	netImguiDeleteSafe(mpInputPending);
+	netImguiDeleteSafe(mpDrawFramePrevious);
 }
 
 //=================================================================================================
@@ -418,7 +423,7 @@ void ClientInfo::ContextOverride()
 		newIO.KeyMap[ImGuiKey_Space]		= static_cast<int>(CmdInput::eVirtualKeys::vkKeyboardSpace);
 		newIO.KeyMap[ImGuiKey_Enter]		= static_cast<int>(CmdInput::eVirtualKeys::vkKeyboardEnter);
 		newIO.KeyMap[ImGuiKey_Escape]		= static_cast<int>(CmdInput::eVirtualKeys::vkKeyboardEscape);
-#if IMGUI_VERSION_NUM >= 17102
+#if IMGUI_VERSION_NUM >= 17102 && IMGUI_VERSION_NUM < 18700
 		newIO.KeyMap[ImGuiKey_KeyPadEnter]	= 0;//static_cast<int>(CmdInput::eVirtualKeys::vkKeyboardKeypadEnter);
 #endif
 		newIO.KeyMap[ImGuiKey_A]			= static_cast<int>(CmdInput::eVirtualKeys::vkKeyboardA);
@@ -428,6 +433,7 @@ void ClientInfo::ContextOverride()
 		newIO.KeyMap[ImGuiKey_Y]			= static_cast<int>(CmdInput::eVirtualKeys::vkKeyboardA) - 'A' + 'Y';
 		newIO.KeyMap[ImGuiKey_Z]			= static_cast<int>(CmdInput::eVirtualKeys::vkKeyboardA) - 'A' + 'Z';
 
+		newIO.MouseDrawCursor				= false;
 		newIO.ClipboardUserData				= nullptr;
 		newIO.BackendPlatformName			= "NetImgui";
 		newIO.BackendRendererName			= "DirectX11";
@@ -446,6 +452,9 @@ void ClientInfo::ContextRestore()
 	// Note: only happens if context overriden is same as current one, to prevent trying to restore to a deleted context
 	if (IsContextOverriden() && ImGui::GetCurrentContext() == mpContext)
 	{
+#ifdef IMGUI_HAS_VIEWPORT
+		ImGui::UpdatePlatformWindows(); // Prevents issue with mismatched frame tracking, when restoring enabled viewport feature
+#endif
 		mSavedContextValues.Restore(mpContext);
 	}
 }
@@ -463,6 +472,56 @@ void ClientInfo::ContextRemoveHooks()
 		mhImguiHookNewframe = mhImguiHookNewframe = 0;
 	}
 #endif
+}
+
+//=================================================================================================
+// Process textures waiting to be sent to server
+// 1. New textures are added tp pending queue (Main Thread)
+// 2. Pending textures are sent to Server and added to our active texture list (Com Thread) 
+//=================================================================================================
+void ClientInfo::ProcessTexturePending()
+{
+	while( mTexturesPendingCreated != mTexturesPendingSent )
+	{
+		mbHasTextureUpdate			|= true;
+		uint32_t idx				= mTexturesPendingSent.fetch_add(1) % static_cast<uint32_t>(ArrayCount(mTexturesPending));
+		CmdTexture* pCmdTexture		= mTexturesPending[idx];
+		mTexturesPending[idx]		= nullptr;
+		if( pCmdTexture )
+		{
+			// Find the TextureId from our list (or free slot)
+			int texIdx		= 0;
+			int texFreeSlot	= static_cast<int>(mTextures.size());
+			while( texIdx < mTextures.size() && ( !mTextures[texIdx].IsValid() || mTextures[texIdx].mpCmdTexture->mTextureId != pCmdTexture->mTextureId) )
+			{
+				texFreeSlot = !mTextures[texIdx].IsValid() ? texIdx : texFreeSlot;
+				++texIdx;
+			}
+
+			if( texIdx == mTextures.size() )
+				texIdx = texFreeSlot;
+			if( texIdx == mTextures.size() )
+				mTextures.push_back(ClientTexture());
+
+			mTextures[texIdx].Set( pCmdTexture );
+			mTextures[texIdx].mbSent = false;
+		}
+	}
+}
+
+//=================================================================================================
+// Create a new Draw Command from Dear Imgui draw data. 
+// 1. New ImGui frame has been completed, create a new draw command from draw data (Main Thread)
+// 2. We see a pending Draw Command, take ownership of it and send it to Server (Com thread)
+//=================================================================================================
+void ClientInfo::ProcessDrawData(const ImDrawData* pDearImguiData, ImGuiMouseCursor mouseCursor)
+{
+	if( !mbValidDrawFrame )
+		return;
+
+	CmdDrawFrame* pDrawFrameNew = ConvertToCmdDrawFrame(pDearImguiData, mouseCursor);
+	pDrawFrameNew->mCompressed	= mClientCompressionMode == eCompressionMode::kForceEnable || (mClientCompressionMode == eCompressionMode::kUseServerSetting && mServerCompressionEnabled);
+	mPendingFrameOut.Assign(pDrawFrameNew);
 }
 
 }}} // namespace NetImgui::Internal::Client

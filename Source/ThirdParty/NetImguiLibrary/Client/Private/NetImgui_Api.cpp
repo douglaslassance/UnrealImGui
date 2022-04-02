@@ -41,7 +41,7 @@ bool ConnectToApp(const char* clientName, const char* ServerHost, uint32_t serve
 {
 	if (!gpClientInfo) return false;
 
-	Client::ClientInfo& client	= *gpClientInfo;	
+	Client::ClientInfo& client	= *gpClientInfo;
 	Disconnect();
 	
 	while (client.IsActive())
@@ -90,7 +90,8 @@ void Disconnect(void)
 	if (!gpClientInfo) return;
 	
 	Client::ClientInfo& client	= *gpClientInfo;
-	client.mbDisconnectRequest	= client.IsActive();
+	client.mbDisconnectRequest	= true;
+	client.KillSocketListen();
 }
 
 //=================================================================================================
@@ -101,7 +102,7 @@ bool IsConnected(void)
 	
 	Client::ClientInfo& client = *gpClientInfo;
 
-	// If disconnected in middle of a remote frame drawing,  
+	// If disconnected in middle of a remote frame drawing,
 	// want to behave like it is still connected to finish frame properly
 	return client.IsConnected() || IsDrawingRemote(); 
 }
@@ -168,7 +169,7 @@ bool NewFrame(bool bSupportFrameSkip)
 		{
 			uint8_t* pPixelData(nullptr); int width(0), height(0);
 			ImGui::GetIO().Fonts->GetTexDataAsAlpha8(&pPixelData, &width, &height);
-			SendDataTexture(ImGui::GetIO().Fonts->TexID, pPixelData, static_cast<uint16_t>(width), static_cast<uint16_t>(height), eTexFormat::kTexFmtA8);
+			SendDataTexture(pFonts->TexID, pPixelData, static_cast<uint16_t>(width), static_cast<uint16_t>(height), eTexFormat::kTexFmtA8);
 		}
 
 		// No font texture has been sent to the netImgui server, you can either 
@@ -233,13 +234,9 @@ void EndFrame(void)
 			ImGui::Render(); 
 		}
 		
-		// We were drawing frame for our remote connection, send the data				
-		if( client.mbValidDrawFrame )
-		{
-			CmdDrawFrame* pNewDrawFrame = CreateCmdDrawDrame(ImGui::GetDrawData(), Cursor);
-			client.mPendingFrameOut.Assign(pNewDrawFrame);
-		}
-
+		// Prepare the Dear Imgui DrawData for later tranmission to Server
+		client.ProcessDrawData(ImGui::GetDrawData(), Cursor);
+		
 		// Detect change to background settings by user, and forward them to server
 		if( client.mBGSetting != client.mBGSettingSent )
 		{
@@ -250,7 +247,7 @@ void EndFrame(void)
 		}
 
 		// Restore display size, so we never lose original setting that may get updated after initial connection
-		if( client.mbIsRemoteDrawing ) {			
+		if( client.mbIsRemoteDrawing ) {
 			ImGui::GetIO().DisplaySize = client.mSavedDisplaySize;
 		}
 	}
@@ -281,7 +278,7 @@ void SendDataTexture(ImTextureID textureId, void* pData, uint16_t width, uint16_
 
 	// Makes sure even 32bits ImTextureID value are received properly as 64bits
 	uint64_t texId64(0);
-	static_assert(sizeof(uint64_t) <= sizeof(textureId), "ImTextureID is bigger than 64bits, CmdTexture::mTextureId needs to be updated to support it");
+	static_assert(sizeof(uint64_t) >= sizeof(textureId), "ImTextureID is bigger than 64bits, CmdTexture::mTextureId needs to be updated to support it");
 	reinterpret_cast<ImTextureID*>(&texId64)[0] = textureId;
 
 	// Add/Update a texture
@@ -298,7 +295,7 @@ void SendDataTexture(ImTextureID textureId, void* pData, uint16_t width, uint16_
 		pCmdTexture->mWidth					= width;
 		pCmdTexture->mHeight				= height;
 		pCmdTexture->mTextureId				= texId64;
-		pCmdTexture->mFormat				= format;
+		pCmdTexture->mFormat				= static_cast<uint8_t>(format);
 		pCmdTexture->mpTextureData.ToOffset();
 
 		// Detects when user is sending the font texture
@@ -323,19 +320,19 @@ void SendDataTexture(ImTextureID textureId, void* pData, uint16_t width, uint16_
 
 	// In unlikely event of too many textures, wait for them to be processed 
 	// (if connected) or Process them now (if not)
-	while( (client.mTexturesPendingCreated - client.mTexturesPendingSent) >= static_cast<int32_t>(ArrayCount(client.mTexturesPending)) )
+	while( (client.mTexturesPendingCreated - client.mTexturesPendingSent) >= static_cast<uint32_t>(ArrayCount(client.mTexturesPending)) )
 	{
 		if( IsConnected() )
 			std::this_thread::yield();
 		else
-			client.TextureProcessPending();
+			client.ProcessTexturePending();
 	}
-	int32_t idx						= client.mTexturesPendingCreated.fetch_add(1) % static_cast<int32_t>(ArrayCount(client.mTexturesPending));
+	uint32_t idx					= client.mTexturesPendingCreated.fetch_add(1) % static_cast<uint32_t>(ArrayCount(client.mTexturesPending));
 	client.mTexturesPending[idx]	= pCmdTexture;
 
 	// If not connected to server yet, update all pending textures
 	if( !IsConnected() )
-		client.TextureProcessPending();
+		client.ProcessTexturePending();
 }
 
 //=================================================================================================
@@ -392,6 +389,25 @@ void SetBackground(const ImVec4& bgColor, const ImVec4& textureTint, ImTextureID
 }
 
 //=================================================================================================
+void SetCompressionMode(eCompressionMode eMode)
+//=================================================================================================
+{
+	if (!gpClientInfo) return;
+	
+	Client::ClientInfo& client		= *gpClientInfo;
+	client.mClientCompressionMode	= static_cast<uint8_t>(eMode);
+}
+//=================================================================================================
+eCompressionMode GetCompressionMode()
+//=================================================================================================
+{
+	if (!gpClientInfo) return eCompressionMode::kUseServerSetting;
+	
+	Client::ClientInfo& client	= *gpClientInfo;
+	return static_cast<eCompressionMode>(client.mClientCompressionMode);
+}
+
+//=================================================================================================
 bool Startup(void)
 //=================================================================================================
 {
@@ -404,17 +420,17 @@ bool Startup(void)
 }
 
 //=================================================================================================
-void Shutdown(bool bWait)
+void Shutdown()
 //=================================================================================================
 {
 	if (!gpClientInfo) return;
 	
 	Disconnect();
-	while(bWait && gpClientInfo->IsActive() )
+	while( gpClientInfo->IsActive() )
 		std::this_thread::yield();
 	Network::Shutdown();
 	
-	netImguiDeleteSafe(gpClientInfo);		
+	netImguiDeleteSafe(gpClientInfo);
 }
 
 
@@ -479,7 +495,7 @@ bool ProcessInputData(Client::ClientInfo& client)
 {
 	CmdInput* pCmdInputNew	= client.mPendingInputIn.Release();
 	bool hasNewInput		= pCmdInputNew != nullptr; 	
-	CmdInput* pCmdInput		= hasNewInput ? pCmdInputNew : client.mpLastInput;
+	CmdInput* pCmdInput		= hasNewInput ? pCmdInputNew : client.mpInputPending;
 	ImGuiIO& io				= ImGui::GetIO();
 
 	if (pCmdInput)
@@ -514,13 +530,15 @@ bool ProcessInputData(Client::ClientInfo& client)
 			client.mPendingKeyIn.ReadData(&character, keyCount);
 		}
 
-		client.mMouseWheelVertPrev	= pCmdInput->mMouseWheelVert;
-		client.mMouseWheelHorizPrev = pCmdInput->mMouseWheelHoriz;				
+		client.mMouseWheelVertPrev			= pCmdInput->mMouseWheelVert;
+		client.mMouseWheelHorizPrev			= pCmdInput->mMouseWheelHoriz;
+		client.mServerCompressionEnabled	= pCmdInput->mCompressionUse;
+		client.mServerCompressionSkip		|= pCmdInput->mCompressionSkip;
 	}
 
 	if( hasNewInput ){
-		netImguiDeleteSafe(client.mpLastInput);
-		client.mpLastInput		= pCmdInputNew;
+		netImguiDeleteSafe(client.mpInputPending);
+		client.mpInputPending		= pCmdInputNew;
 	}
 	return hasNewInput;
 }

@@ -3,20 +3,42 @@ namespace NetImgui { namespace Internal
 // @sammyfreg TODO: Make Offset/Pointer test safer
 void CmdDrawFrame::ToPointers()
 {
-	if( !mpIndices.IsPointer() ) //Safer to test the first element after CmdHeader
+	if( !mpDrawGroups.IsPointer() )
 	{
-		mpVertices.ToPointer();
-		mpIndices.ToPointer();
-		mpDraws.ToPointer();
+		mpDrawGroups.ToPointer();
+		for (uint32_t i(0); i < mDrawGroupCount; ++i) {
+			mpDrawGroups[i].ToPointers();
+		}
 	}
 }
 
 void CmdDrawFrame::ToOffsets()
 {
+	if( !mpDrawGroups.IsOffset() )
+	{
+		for (uint32_t i(0); i < mDrawGroupCount; ++i) {
+			mpDrawGroups[i].ToOffsets();
+		}
+		mpDrawGroups.ToOffset();
+	}
+}
+
+void ImguiDrawGroup::ToPointers()
+{
+	if( !mpIndices.IsPointer() ) //Safer to test the first element after CmdHeader
+	{
+		mpIndices.ToPointer();
+		mpVertices.ToPointer();
+		mpDraws.ToPointer();
+	}
+}
+
+void ImguiDrawGroup::ToOffsets()
+{
 	if( !mpIndices.IsOffset() ) //Safer to test the first element after CmdHeader
 	{
-		mpVertices.ToOffset();
 		mpIndices.ToOffset();
+		mpVertices.ToOffset();
 		mpDraws.ToOffset();
 	}
 }
@@ -29,8 +51,8 @@ bool CmdInput::IsKeyDown(eVirtualKeys vkKey)const
 
 void CmdInput::SetKeyDown(eVirtualKeys vkKey, bool isDown)
 {
-	const size_t keyEntryIndex	= static_cast<uint64_t>(vkKey) / 64;
-	const uint64_t keyBitMask	= static_cast<uint64_t>(1) << static_cast<uint64_t>(vkKey) % 64;	
+	const uint64_t keyEntryIndex	= static_cast<uint64_t>(vkKey) / 64;
+	const uint64_t keyBitMask		= static_cast<uint64_t>(1) << static_cast<uint64_t>(vkKey) % 64;	
 	mKeysDownMask[keyEntryIndex]= isDown ?	mKeysDownMask[keyEntryIndex] | keyBitMask : 
 											mKeysDownMask[keyEntryIndex] & ~keyBitMask;
 }
