@@ -11,7 +11,7 @@
 
 #define LOCTEXT_NAMESPACE "ImguiUnrealCommand"
 
-namespace ImUnrealcommand
+namespace ImUnrealCommand
 {
 
 static FString kPresetHistoryName	= TEXT("Recents");

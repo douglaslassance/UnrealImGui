@@ -90,7 +90,7 @@ FImGuiContextProxy::FImGuiContextProxy(const FString& InName, int32 InContextInd
 	
 	// Initialize the Unreal Console Command Widget
 #if IMGUI_UNREAL_COMMAND_ENABLED
-	mpImUnrealCommandContext = ImUnrealcommand::Create();
+	mpImUnrealCommandContext = ImUnrealCommand::Create();
 
 	// Commented code demonstrating how to add/modify Presets
 	// Could also modify the list of 'Default Presets' directly (UECommandImgui::sDefaultPresets)
@@ -137,7 +137,7 @@ FImGuiContextProxy::~FImGuiContextProxy()
 		ImPlot::DestroyContext();
 
 	#if IMGUI_UNREAL_COMMAND_ENABLED
-		ImUnrealcommand::Destroy(mpImUnrealCommandContext);
+		ImUnrealCommand::Destroy(mpImUnrealCommandContext);
 	#endif
 
 	}
@@ -215,12 +215,12 @@ void FImGuiContextProxy::DrawDebug()
 		//----------------------------------------------------------------------------
 	#if IMGUI_UNREAL_COMMAND_ENABLED
 		if (ImGui::BeginMainMenuBar()) {
-			ImGui::MenuItem("Unreal-Commands", nullptr, &ImUnrealcommand::IsVisible(mpImUnrealCommandContext) );
+			ImGui::MenuItem("Unreal-Commands", nullptr, &ImUnrealCommand::IsVisible(mpImUnrealCommandContext) );
 			ImGui::EndMainMenuBar();
 		}
 
 		// Always try displaying the 'Unreal Command Imgui' Window (handle Window visibility internally)
-		ImUnrealcommand::Show(mpImUnrealCommandContext);
+		ImUnrealCommand::Show(mpImUnrealCommandContext);
 	#endif
 	}
 }

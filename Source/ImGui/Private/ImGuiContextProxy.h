@@ -120,6 +120,6 @@ private:
 
 	std::string IniFilename;
 #if IMGUI_UNREAL_COMMAND_ENABLED
-	ImUnrealcommand::CommandContext* mpImUnrealCommandContext = nullptr;
+	ImUnrealCommand::CommandContext* mpImUnrealCommandContext = nullptr;
 #endif
 };

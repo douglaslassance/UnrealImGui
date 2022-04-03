@@ -29,7 +29,7 @@
 
 #include "CoreMinimal.h"
 
-namespace ImUnrealcommand
+namespace ImUnrealCommand
 {
 	struct			CommandContext;
 
