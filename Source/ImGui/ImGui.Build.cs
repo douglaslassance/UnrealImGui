@@ -23,6 +23,7 @@ public class ImGui : ModuleRules
 		// Enable runtime loader, if you want this module to be automatically loaded in runtime builds (monolithic).
 		bool bEnableRuntimeLoader = true;
 		bool bUnrealImguiEnabled = true;
+		bool bEnableImUnrealCommand = true;
 
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
@@ -45,7 +46,8 @@ public class ImGui : ModuleRules
 			new string[] {
 				"ImGui/Private",
 				"ThirdParty/ImGuiLibrary/Private",
-				"ThirdParty/ImPlotLibrary/Private"
+				"ThirdParty/ImPlotLibrary/Private",
+				"ThirdParty/ImUnrealConsole/Private"
 				// ... add other private include paths required here ...
 			}
 			);
@@ -101,7 +103,8 @@ public class ImGui : ModuleRules
 #endif
 		PublicDefinitions.Add(string.Format("UNREAL_IMGUI_ENABLED={0}", bUnrealImguiEnabled ? 1 : 0));
 		PrivateDefinitions.Add(string.Format("RUNTIME_LOADER_ENABLED={0}", bEnableRuntimeLoader ? 1 : 0));
-
+		PrivateDefinitions.Add(string.Format("IMGUI_UNREAL_COMMAND_ENABLED={0}", bEnableImUnrealCommand ? 1 : 0));
+		
 		// Force ImPlot to export its methods in this module DLL so we can import them in our main project
 		PrivateDefinitions.Add(string.Format("IMPLOT_API=DLLEXPORT"));
 	}

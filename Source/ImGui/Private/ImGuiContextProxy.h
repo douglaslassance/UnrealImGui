@@ -4,6 +4,7 @@
 
 #include "ImGuiDrawData.h"
 #include "ImGuiInputState.h"
+#include "ImUnrealCommand.h"
 #include "Utilities/WorldContextIndex.h"
 
 #include <GenericPlatform/ICursor.h>
@@ -118,4 +119,7 @@ private:
 	FSimpleMulticastDelegate DrawEvent;
 
 	std::string IniFilename;
+#if IMGUI_UNREAL_COMMAND_ENABLED
+	ImUnrealcommand::CommandContext* mpImUnrealCommandContext = nullptr;
+#endif
 };
