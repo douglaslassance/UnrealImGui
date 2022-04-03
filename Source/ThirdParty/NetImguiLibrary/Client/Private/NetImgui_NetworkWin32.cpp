@@ -48,7 +48,7 @@ SocketInfo* Connect(const char* ServerHost, uint32_t ServerPort)
 	char zPortName[32];
 	addrinfo*	pResults	= nullptr;
 	SocketInfo* pSocketInfo	= nullptr;
-	sprintf_s(zPortName, "%i", ServerPort);
+	NetImgui::Internal::StringFormat(zPortName, "%i", ServerPort);
 	getaddrinfo(ServerHost, zPortName, nullptr, &pResults);
 	addrinfo*	pResultCur	= pResults;
 	while( pResultCur && !pSocketInfo )
@@ -77,10 +77,13 @@ SocketInfo* ListenStart(uint32_t ListenPort)
 		server.sin_family		= AF_INET;
 		server.sin_addr.s_addr	= INADDR_ANY;
 		server.sin_port			= htons(static_cast<USHORT>(ListenPort));
+		
+		constexpr BOOL ReUseAdrValue(true);
+		setsockopt(ListenSocket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&ReUseAdrValue), sizeof(ReUseAdrValue));
 		if(	bind(ListenSocket, reinterpret_cast<sockaddr*>(&server), sizeof(server)) != SOCKET_ERROR &&
 			listen(ListenSocket, 0) != SOCKET_ERROR )
 		{
-			SetNonBlocking(ListenSocket, true);
+			SetNonBlocking(ListenSocket, false);
 			return netImguiNew<SocketInfo>(ListenSocket);
 		}
 		closesocket(ListenSocket);

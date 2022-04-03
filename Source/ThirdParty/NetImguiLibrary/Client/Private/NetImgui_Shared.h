@@ -7,9 +7,13 @@
 #pragma warning (disable: 4464)		// warning C4464: relative include path contains '..'
 #endif
 
-#define NETIMGUI_INTERNAL_INCLUDE 1
-#include "../NetImgui_Api.h"
-#undef NETIMGUI_INTERNAL_INCLUDE
+#ifndef NETIMGUI_INTERNAL_INCLUDE
+	#define NETIMGUI_INTERNAL_INCLUDE 1
+	#include "../NetImgui_Api.h"
+	#undef NETIMGUI_INTERNAL_INCLUDE
+#else
+	#include "../NetImgui_Api.h"
+#endif
 
 #if NETIMGUI_ENABLED
 
@@ -23,15 +27,21 @@
 #include "NetImgui_WarningReenable.h"
 //=================================================================================================
 
-#define NETIMGUI_IMGUI_CALLBACK_ENABLED ((IMGUI_VERSION_NUM >= 18000) && 0)
+//=================================================================================================
+// Enable using Dear ImGui Callbacks support to automatically intercept BeginFrame/Render.
+// Needs Dear ImGui 1.81+
+//=================================================================================================
+#ifndef NETIMGUI_IMGUI_CALLBACK_ENABLED
+	#define NETIMGUI_IMGUI_CALLBACK_ENABLED (IMGUI_VERSION_NUM >= 18100)
+#endif
 
 //=================================================================================================
 #include "NetImgui_WarningDisable.h"
 namespace NetImgui { namespace Internal
 {
 
-constexpr uint64_t	u64Invalid	= static_cast<uint64_t>(-1);
-constexpr size_t	sizeInvalid	= static_cast<size_t>(-1);
+using				ComDataType = uint64_t;
+constexpr size_t	ComDataSize = sizeof(ComDataType);
 
 //=============================================================================
 // All allocations made by netImgui goes through here. 
@@ -107,25 +117,27 @@ private:
 template <typename TType>
 struct OffsetPointer
 {
-	inline				OffsetPointer();
-	inline explicit		OffsetPointer(TType* pPointer);
-	inline explicit		OffsetPointer(uint64_t offset);
+	inline						OffsetPointer();
+	inline explicit				OffsetPointer(TType* pPointer);
+	inline explicit				OffsetPointer(uint64_t offset);
 
-	inline bool			IsPointer()const;
-	inline bool			IsOffset()const;
+	inline bool					IsPointer()const;
+	inline bool					IsOffset()const;
 
-	inline TType*		ToPointer();
-	inline uint64_t		ToOffset();
-	inline TType*		operator->();
-	inline const TType*	operator->()const;
-	inline TType&		operator[](size_t index);
-	inline const TType&	operator[](size_t index)const;
+	inline TType*				ToPointer();
+	inline uint64_t				ToOffset();
+	inline TType*				operator->();
+	inline const TType*			operator->()const;
+	inline TType&				operator[](size_t index);
+	inline const TType&			operator[](size_t index)const;
 
-	inline TType*		Get();
-	inline const TType*	Get()const;
-	inline uint64_t		GetOff()const;
-	inline void			SetPtr(TType* pPointer);
-	inline void			SetOff(uint64_t offset);
+	inline TType*				Get();
+	inline const TType*			Get()const;
+	inline const ComDataType*	GetComData()const;
+	inline uint64_t				GetOff()const;
+	inline void					SetPtr(TType* pPointer);
+	inline void					SetComDataPtr(ComDataType* pPointer);
+	inline void					SetOff(uint64_t offset);
 	
 private:
 	union
@@ -163,8 +175,29 @@ constexpr std::size_t ArrayCount(T const (&)[N]) noexcept
 	return N;
 }
 
+//=============================================================================
+//=============================================================================
 template <size_t charCount>
-inline void StringCopy(char (&output)[charCount], const char* pSrc);
+inline void StringCopy(char (&output)[charCount], const char* pSrc, size_t srcCharCount=0xFFFFFFFE);
+
+template <size_t charCount>
+int StringFormat(char(&output)[charCount], char const* const format, ...);
+
+//=============================================================================
+// Get the (value / Denominator) rounded up to the next int value big enough
+//=============================================================================
+template <typename IntType>
+IntType DivUp(IntType Value, IntType Denominator);
+
+//=============================================================================
+// Get the rounded up value
+//=============================================================================
+template <typename IntType>
+IntType RoundUp(IntType Value, IntType Round);
+
+inline uint64_t TextureCastHelper(ImTextureID textureID);
+inline ImTextureID TextureCastHelper(const void* pTexture);
+inline ImTextureID TextureCastHelper(uint64_t textureID);
 
 }} //namespace NetImgui::Internal
 

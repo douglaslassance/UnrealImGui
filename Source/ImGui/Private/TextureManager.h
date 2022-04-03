@@ -41,7 +41,7 @@ public:
 	// @returns The index of a texture with given name or INDEX_NONE if there is no such texture
 	TextureIndex FindTextureIndex(const FName& Name) const
 	{
-		return TextureResources.IndexOfByPredicate([&](const auto& Entry) { return Entry.Name == Name; });
+		return TextureResources.IndexOfByPredicate([&](const auto& Entry) { return Entry.GetName() == Name; });
 	}
 
 	// Get the name of a texture at given index. Returns NAME_None, if index is out of range.
@@ -49,7 +49,7 @@ public:
 	// @returns The name of a texture at given index or NAME_None if index is out of range.
 	FName GetTextureName(TextureIndex Index) const
 	{
-		return IsInRange(Index) ? TextureResources[Index].Name : NAME_None;
+		return IsInRange(Index) ? TextureResources[Index].GetName() : NAME_None;
 	}
 
 	// Get the Slate Resource Handle to a texture at given index. If index is out of range or resources are not valid
@@ -59,7 +59,7 @@ public:
 	// found at given index
 	const FSlateResourceHandle& GetTextureHandle(TextureIndex Index) const
 	{
-		return IsValidTexture(Index) ? TextureResources[Index].ResourceHandle : ErrorTexture.ResourceHandle;
+		return IsValidTexture(Index) ? TextureResources[Index].GetResourceHandle() : ErrorTexture.GetResourceHandle();
 	}
 
 	// Create a texture from raw data.
@@ -84,7 +84,7 @@ public:
 	// @param Name - The texture name
 	// @param Texture - The texture
 	// @returns The index to created/updated texture resources
-	TextureIndex CreateTextureResources(const FName& Name, UTexture2D* Texture);
+	TextureIndex CreateTextureResources(const FName& Name, UTexture* Texture);
 
 	// Release resources for given texture. Ignores invalid indices.
 	// @param Index - The index of a texture resources
@@ -107,7 +107,7 @@ private:
 	// @param Texture - The texture
 	// @param bAddToRoot - If true, we should add texture to root to prevent garbage collection (use for own textures)
 	// @returns The index of the entry that we created or reused
-	TextureIndex AddTextureEntry(const FName& Name, UTexture2D* Texture, bool bAddToRoot);
+	TextureIndex AddTextureEntry(const FName& Name, UTexture* Texture, bool bAddToRoot);
 
 	// Check whether index is in range allocated for TextureResources (it doesn't mean that resources are valid).
 	FORCEINLINE bool IsInRange(TextureIndex Index) const
@@ -118,14 +118,14 @@ private:
 	// Check whether index is in range and whether texture resources are valid (using NAME_None sentinel).
 	FORCEINLINE bool IsValidTexture(TextureIndex Index) const
 	{
-		return IsInRange(Index) && TextureResources[Index].Name != NAME_None;
+		return IsInRange(Index) && TextureResources[Index].GetName() != NAME_None;
 	}
 
 	// Entry for texture resources. Only supports explicit construction.
 	struct FTextureEntry
 	{
 		FTextureEntry() = default;
-		FTextureEntry(const FName& InName, UTexture2D* InTexture, bool bAddToRoot);
+		FTextureEntry(const FName& InName, UTexture* InTexture, bool bAddToRoot);
 		~FTextureEntry();
 
 		// Copying is not supported.
@@ -137,14 +137,17 @@ private:
 		// ... but we need move assignment to support reusing entries.
 		FTextureEntry& operator=(FTextureEntry&& Other);
 
-		FName Name = NAME_None;
-		TWeakObjectPtr<UTexture2D> Texture;
-		FSlateBrush Brush;
-		FSlateResourceHandle ResourceHandle;
+		const FName& GetName() const { return Name; }
+		const FSlateResourceHandle& GetResourceHandle() const;
 
 	private:
 
 		void Reset(bool bReleaseResources);
+
+		FName Name = NAME_None;
+		mutable FSlateResourceHandle CachedResourceHandle;
+		TWeakObjectPtr<UTexture> Texture;
+		FSlateBrush Brush;
 	};
 
 	TArray<FTextureEntry> TextureResources;

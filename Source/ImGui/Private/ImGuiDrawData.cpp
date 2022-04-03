@@ -2,7 +2,6 @@
 
 #include "ImGuiDrawData.h"
 
-
 #if ENGINE_COMPATIBILITY_LEGACY_CLIPPING_API
 void FImGuiDrawList::CopyVertexData(TArray<FSlateVertex>& OutVertexBuffer, const FTransform2D& Transform, const FSlateRotatedRect& VertexClippingRect) const
 #else

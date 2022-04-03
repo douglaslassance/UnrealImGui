@@ -9,6 +9,9 @@
 #include "Utilities/Arrays.h"
 #include "VersionCompatibility.h"
 
+// Include ImPlot here so we can call `ImPlot::CreateContext`
+#include <implot.h>
+
 #include <GenericPlatform/GenericPlatformFile.h>
 #include <Misc/Paths.h>
 
@@ -82,6 +85,19 @@ FImGuiContextProxy::FImGuiContextProxy(const FString& InName, int32 InContextInd
 	// Create context.
 	Context = ImGui::CreateContext(InFontAtlas);
 
+	// Create ImPlot context
+	ImPlot::CreateContext();
+	
+	// Initialize the Unreal Console Command Widget
+#if IMGUI_UNREAL_COMMAND_ENABLED
+	mpImUnrealCommandContext = ImUnrealCommand::Create();
+
+	// Commented code demonstrating how to add/modify Presets
+	// Could also modify the list of 'Default Presets' directly (UECommandImgui::sDefaultPresets)
+	//ImUnrealcommand::AddPresetFilters(mpImUnrealCommandContext, TEXT("ExamplePreset"), {"ai.Debug", "fx.Dump"});
+	//ImUnrealcommand::AddPresetCommands(mpImUnrealCommandContext, TEXT("ExamplePreset"), {"Stat Unit", "Stat Fps"});
+#endif
+
 	// Set this context in ImGui for initialization (any allocations will be tracked in this context).
 	SetAsCurrent();
 
@@ -93,7 +109,7 @@ FImGuiContextProxy::FImGuiContextProxy(const FString& InName, int32 InContextInd
 
 	// Start with the default canvas size.
 	ResetDisplaySize();
-	IO.DisplaySize = { DisplaySize.X, DisplaySize.Y };
+	IO.DisplaySize = { (float)DisplaySize.X,(float)DisplaySize.Y };
 
 	// Set the initial DPI scale.
 	SetDPIScale(InDPIScale);
@@ -116,6 +132,14 @@ FImGuiContextProxy::~FImGuiContextProxy()
 
 		// Save context data and destroy.
 		ImGui::DestroyContext(Context);
+
+		// Destroy ImPlot context
+		ImPlot::DestroyContext();
+
+	#if IMGUI_UNREAL_COMMAND_ENABLED
+		ImUnrealCommand::Destroy(mpImUnrealCommandContext);
+	#endif
+
 	}
 }
 
@@ -184,6 +208,20 @@ void FImGuiContextProxy::DrawDebug()
 			BroadcastWorldDebug();
 			BroadcastMultiContextDebug();
 		}
+
+		//----------------------------------------------------------------------------
+		// Display a 'Unreal Console Command' menu entry in MainMenu bar, and the 
+		// 'Unreal Console command' window itself when requested
+		//----------------------------------------------------------------------------
+	#if IMGUI_UNREAL_COMMAND_ENABLED
+		if (ImGui::BeginMainMenuBar()) {
+			ImGui::MenuItem("Unreal-Commands", nullptr, &ImUnrealCommand::IsVisible(mpImUnrealCommandContext) );
+			ImGui::EndMainMenuBar();
+		}
+
+		// Always try displaying the 'Unreal Command Imgui' Window (handle Window visibility internally)
+		ImUnrealCommand::Show(mpImUnrealCommandContext);
+	#endif
 	}
 }
 
@@ -226,7 +264,7 @@ void FImGuiContextProxy::BeginFrame(float DeltaTime)
 			SetAsCurrent();
 			ImGuiIO& IO		= ImGui::GetIO();
 			IO.DeltaTime	= DeltaTime;
-			IO.DisplaySize	= { DisplaySize.X, DisplaySize.Y };
+			IO.DisplaySize = { (float)DisplaySize.X, (float)DisplaySize.Y };
 			ImGuiInterops::CopyInput(IO, InputState);
 			ImGui::NewFrame();
 		}

@@ -27,7 +27,7 @@ TextureIndex FTextureManager::CreatePlainTexture(const FName& Name, int32 Width,
 	return CreatePlainTextureInternal(Name, Width, Height, Color);
 }
 
-TextureIndex FTextureManager::CreateTextureResources(const FName& Name, UTexture2D* Texture)
+TextureIndex FTextureManager::CreateTextureResources(const FName& Name, UTexture* Texture)
 {
 	checkf(Name != NAME_None, TEXT("Trying to create texture resources with a name 'NAME_None' is not allowed."));
 	checkf(Texture, TEXT("Null Texture."));
@@ -99,7 +99,7 @@ TextureIndex FTextureManager::CreatePlainTextureInternal(const FName& Name, int3
 	return CreateTextureInternal(Name, Width, Height, Bpp, SrcData, SrcDataCleanup);
 }
 
-TextureIndex FTextureManager::AddTextureEntry(const FName& Name, UTexture2D* Texture, bool bAddToRoot)
+TextureIndex FTextureManager::AddTextureEntry(const FName& Name, UTexture* Texture, bool bAddToRoot)
 {
 	// Try to find an entry with that name.
 	TextureIndex Index = FindTextureIndex(Name);
@@ -122,7 +122,7 @@ TextureIndex FTextureManager::AddTextureEntry(const FName& Name, UTexture2D* Tex
 	}
 }
 
-FTextureManager::FTextureEntry::FTextureEntry(const FName& InName, UTexture2D* InTexture, bool bAddToRoot)
+FTextureManager::FTextureEntry::FTextureEntry(const FName& InName, UTexture* InTexture, bool bAddToRoot)
 	: Name(InName)
 {
 	checkf(InTexture, TEXT("Null texture."));
@@ -137,7 +137,7 @@ FTextureManager::FTextureEntry::FTextureEntry(const FName& InName, UTexture2D* I
 
 	// Create brush and resource handle for input texture.
 	Brush.SetResourceObject(InTexture);
-	ResourceHandle = FSlateApplication::Get().GetRenderer()->GetResourceHandle(Brush);
+	CachedResourceHandle = FSlateApplication::Get().GetRenderer()->GetResourceHandle(Brush);
 }
 
 FTextureManager::FTextureEntry::~FTextureEntry()
@@ -154,13 +154,22 @@ FTextureManager::FTextureEntry& FTextureManager::FTextureEntry::operator=(FTextu
 	Name = MoveTemp(Other.Name);
 	Texture = MoveTemp(Other.Texture);
 	Brush = MoveTemp(Other.Brush);
-	ResourceHandle = MoveTemp(Other.ResourceHandle);
+	CachedResourceHandle = MoveTemp(Other.CachedResourceHandle);
 
 	// Reset the other entry (without releasing resources which are already moved to this instance) to remove tracks
 	// of ownership and mark it as empty/reusable.
 	Other.Reset(false);
 
 	return *this;
+}
+
+const FSlateResourceHandle& FTextureManager::FTextureEntry::GetResourceHandle() const
+{
+	if (!CachedResourceHandle.IsValid() && Brush.HasUObject())
+	{
+		CachedResourceHandle = FSlateApplication::Get().GetRenderer()->GetResourceHandle(Brush);
+	}
+	return CachedResourceHandle;
 }
 
 void FTextureManager::FTextureEntry::Reset(bool bReleaseResources)
@@ -187,5 +196,5 @@ void FTextureManager::FTextureEntry::Reset(bool bReleaseResources)
 	// Clean fields to make sure that we don't reference released or moved resources.
 	Texture.Reset();
 	Brush = FSlateNoResource();
-	ResourceHandle = FSlateResourceHandle();
+	CachedResourceHandle = FSlateResourceHandle();
 }
