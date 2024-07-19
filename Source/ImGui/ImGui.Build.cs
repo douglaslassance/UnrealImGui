@@ -34,7 +34,8 @@ public class ImGui : ModuleRules
 		PublicIncludePaths.AddRange(
 			new string[] {
 				Path.Combine(ModuleDirectory, "../ThirdParty/ImGuiLibrary/Include"),
-				Path.Combine(ModuleDirectory, "../ThirdParty/ImPlotLibrary/Public")
+				Path.Combine(ModuleDirectory, "../ThirdParty/ImPlotLibrary/Public"),
+				Path.Combine(ModuleDirectory, "../ThirdParty/ImGuiLibrary/Private"),
 				// ... add public include paths required here ...
 			}
 			);
